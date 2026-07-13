@@ -1,0 +1,12 @@
+[Unit]
+Description=Health Telegram Q&A bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/health-summary/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,68 @@
+name: Daily health summary
+
+# Расписание: cron на сервере дергает workflow_dispatch (GitHub cron ненадёжен)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "morning / evening / weekly / auto"
+        required: false
+        default: "auto"
+      question:
+        description: "вопрос к данным (режим ask)"
+        required: false
+        default: ""
+      extra_args:
+        description: "доп. аргументы, напр.: --date 2026-07-09 --debug --dry-run"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-health-summary
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (Claude Code + matplotlib)
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          pip install -q matplotlib
+
+      - name: Run
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_MODEL: opus
+          TZ_NAME: Europe/Moscow
+          QUESTION: ${{ github.event.inputs.question }}
+        run: |
+          if [ -n "$QUESTION" ]; then
+            python summary.py --ask "$QUESTION"
+          else
+            python summary.py --analyze --chart chart.png --save-history data \
+              --mode "${{ github.event.inputs.mode || 'auto' }}" ${{ github.event.inputs.extra_args }}
+          fi
+
+      - name: Commit history
+        if: github.event.inputs.question == ''
+        run: |
+          git config user.name "health-bot"
+          git config user.email "health-bot@users.noreply.github.com"
+          git add data/ 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "data: $(date -u +%F)" && git push)

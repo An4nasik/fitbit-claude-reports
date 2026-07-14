@@ -614,8 +614,11 @@ def build_analysis(history: dict, base_text: str, weekly: bool = False) -> str |
     )
     cmd = os.environ.get("CLAUDE_BIN", "claude")
     model = os.environ.get("CLAUDE_MODEL", "")
-    attempts = [["--model", model]] if model else []
-    attempts.append([])  # fallback: дефолтная модель, если явная недоступна/лимит
+    # --no-session-persistence: не засорять Recents; --bare: без хуков/скиллов
+    base = ["--bare", "--no-session-persistence"]
+    attempts = [base + ["--model", model]] if model else []
+    attempts.append(base)      # дефолтная модель, если явная недоступна/лимит
+    attempts.append([])        # совсем без флагов — если CLI их не знает
     for extra in attempts:
         try:
             r = subprocess.run([cmd, "-p", *extra], input=prompt,
@@ -777,7 +780,9 @@ def build_ask(hc: Health, tz: ZoneInfo, question: str) -> str:
     )
     cmd = os.environ.get("CLAUDE_BIN", "claude")
     model = os.environ.get("CLAUDE_MODEL", "")
-    attempts = [["--model", model]] if model else []
+    base = ["--bare", "--no-session-persistence"]
+    attempts = [base + ["--model", model]] if model else []
+    attempts.append(base)
     attempts.append([])
     for extra in attempts:
         try:

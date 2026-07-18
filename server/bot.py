@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""Telegram-бот на VPS: вопрос по данным здоровья -> GitHub Actions -> ответ Claude.
+"""Telegram-бот на VPS: команды перезапуска сводок и вопросы по данным здоровья.
 
-Работает как systemd-сервис (healthbot.service), long polling, stdlib only.
+Диспатчит GitHub Actions workflow. Работает как systemd-сервис (healthbot.service),
+long polling, stdlib only.
+
+Команды:
+  /redo      — пересобрать последнюю сводку (по времени суток: утро/вечер)
+  /morning   — пересобрать утреннюю сводку (после досинхронизации сна)
+  /evening   — пересобрать вечернюю сводку
+  /weekly    — пересобрать недельный отчёт
+  любой текст — вопрос к данным (Claude ответит по твоим метрикам)
 """
 import json
 import time
@@ -23,6 +31,20 @@ DISPATCH_URL = (f"https://api.github.com/repos/{REPO}"
                 "/actions/workflows/daily-summary.yml/dispatches")
 RATE_SECONDS = 30
 
+HELP = (
+    "Привет! Что я умею:\n\n"
+    "/redo — пересобрать последнюю сводку (утро/вечер по времени)\n"
+    "/morning — пересобрать утреннюю сводку (если сон досинхронизировался)\n"
+    "/evening — пересобрать итоги дня\n"
+    "/weekly — пересобрать недельный отчёт\n\n"
+    "Или просто задай вопрос по данным — например: "
+    "«как мой сон за последний месяц?»"
+)
+
+# команда -> mode для workflow
+REPORT_CMDS = {"/redo": "auto", "/again": "auto", "/morning": "morning",
+               "/evening": "evening", "/weekly": "weekly"}
+
 
 def tg(method, **params):
     req = urllib.request.Request(
@@ -36,8 +58,8 @@ def say(text):
     tg("sendMessage", chat_id=CHAT, text=text)
 
 
-def dispatch(question):
-    body = json.dumps({"ref": "main", "inputs": {"question": question[:400]}}).encode()
+def dispatch(inputs):
+    body = json.dumps({"ref": "main", "inputs": inputs}).encode()
     req = urllib.request.Request(
         DISPATCH_URL, data=body, method="POST",
         headers={"Authorization": f"token {GH_TOKEN}",
@@ -66,16 +88,28 @@ def main():
                 text = (m.get("text") or "").strip()
                 if not text:
                     continue
-                if text.startswith("/start"):
-                    say("Привет! Задай вопрос по своим данным — например: "
-                        "«как мой сон за последний месяц?»")
+
+                if text.startswith(("/start", "/help")):
+                    say(HELP)
                     continue
+
                 if time.time() - last < RATE_SECONDS:
-                    say("⏳ Предыдущий вопрос ещё обрабатывается, подожди чуть-чуть.")
+                    say("⏳ Предыдущий запрос ещё обрабатывается, подожди чуть-чуть.")
                     continue
                 last = time.time()
-                say("🔎 Смотрю данные, ответ придёт примерно через минуту...")
-                dispatch(text)
+
+                cmd = text.split()[0].lower().split("@")[0]
+                if cmd in REPORT_CMDS:
+                    mode = REPORT_CMDS[cmd]
+                    label = {"auto": "сводку", "morning": "утреннюю сводку",
+                             "evening": "итоги дня",
+                             "weekly": "недельный отчёт"}[mode]
+                    say(f"🔄 Пересобираю {label} со свежими данными, "
+                        "придёт примерно через минуту...")
+                    dispatch({"mode": mode})
+                else:
+                    say("🔎 Смотрю данные, ответ придёт примерно через минуту...")
+                    dispatch({"question": text[:400]})
         except Exception:  # noqa: BLE001
             time.sleep(5)
 
